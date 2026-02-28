@@ -3,16 +3,19 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useSocket } from '@/hooks/use-socket';
+import { useNarrator } from '@/hooks/use-narrator';
 import GameBoard from '@/components/game-board';
 import GameStatus from '@/components/game-status';
 import IntensityMeter from '@/components/intensity-meter';
 import MoraleIndicator from '@/components/morale-indicator';
+import NarratorSubtitle from '@/components/narrator-subtitle';
 import ConnectionStatus from '@/components/connection-status';
 import EventDebugPanel from '@/components/event-debug-panel';
 import CrowdEmojis from '@/components/crowd-emojis';
 import SeriesScoreboard from '@/components/series-scoreboard';
 import RoundResultOverlay from '@/components/round-result-overlay';
 import SeriesResult from '@/components/series-result';
+import type { NarrationEvent } from '@/game/types';
 
 interface SeriesLocal {
   currentRound: number;
@@ -48,6 +51,10 @@ export default function GamePage() {
   const [morale, setMorale] = useState<{ X: number; O: number }>({ X: 0, O: 0 });
   const [opponentDisconnected, setOpponentDisconnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [narration, setNarration] = useState<NarrationEvent | null>(null);
+  const narrator = useNarrator({ enabled: true, volume: 0.8 });
+  const narratorSpeakRef = useRef(narrator.speak);
+  narratorSpeakRef.current = narrator.speak;
 
   // Series state
   const [series, setSeries] = useState<SeriesLocal>({
@@ -224,6 +231,11 @@ export default function GamePage() {
       setOpponentDisconnected(false);
     });
 
+    socket.on('narration-update', (data: NarrationEvent) => {
+      setNarration(data);
+      narratorSpeakRef.current(data);
+    });
+
     socket.on('error', (data: { code: string; message: string }) => {
       if (data.code === 'INVALID_TOKEN' || data.code === 'ROOM_NOT_FOUND') {
         // Stale session — clear and redirect home
@@ -247,6 +259,7 @@ export default function GamePage() {
       socket.off('game-state');
       socket.off('player-disconnected');
       socket.off('player-reconnected');
+      socket.off('narration-update');
       socket.off('error');
     };
   }, [socket]);
@@ -277,6 +290,18 @@ export default function GamePage() {
   return (
     <main className="min-h-screen bg-black text-white flex flex-col items-center justify-center gap-6 p-4">
       <div className="absolute top-4 right-4 flex items-center gap-3">
+        <button
+          type="button"
+          onClick={narrator.toggleMuted}
+          className={`text-xs px-2 py-1 rounded transition-colors font-mono ${
+            narrator.muted
+              ? 'bg-gray-800 text-gray-500 hover:text-gray-300'
+              : 'bg-gray-800 text-gray-300 hover:text-white'
+          }`}
+          title={narrator.muted ? 'Unmute narrator' : 'Mute narrator'}
+        >
+          {narrator.muted ? 'TTS Off' : 'TTS On'}
+        </button>
         <ConnectionStatus connected={connected} />
         <button
           type="button"
@@ -330,6 +355,7 @@ export default function GamePage() {
 
       <IntensityMeter intensity={intensity} />
       <MoraleIndicator morale={morale} myMark={myMark} />
+      <NarratorSubtitle narration={narration} />
 
       {opponentDisconnected && (
         <div className="text-yellow-400 bg-yellow-900/30 px-4 py-2 rounded text-sm">

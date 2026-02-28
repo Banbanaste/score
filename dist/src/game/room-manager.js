@@ -50,6 +50,7 @@ function createRoom(socketId) {
         roundStartedAt: Date.now(),
         rematchRequests: new Set(),
         series: (0, types_1.createInitialSeries)(),
+        lastNarration: null,
     };
     rooms.set(roomId, room);
     socketToRoom.set(socketId, { roomId, playerToken });
@@ -167,6 +168,7 @@ function advanceRound(room) {
     room.winner = null;
     room.status = 'active';
     room.roundStartedAt = Date.now();
+    room.lastNarration = null;
     (0, logger_1.log)('ROOM', 'round-advanced', {
         room: room.id,
         round: room.series.currentRound,
@@ -248,6 +250,7 @@ function resetSeries(room) {
     room.roundStartedAt = Date.now();
     room.currentTurn = 'X';
     room.rematchRequests.clear();
+    room.lastNarration = null;
     (0, logger_1.log)('ROOM', 'series-reset', { room: room.id });
 }
 function deleteRoom(roomId) {

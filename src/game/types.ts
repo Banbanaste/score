@@ -55,6 +55,30 @@ export interface GameRoom {
   roundStartedAt: number;                   // timestamp when current round began
   rematchRequests: Set<string>;             // player tokens who requested new series
   series: SeriesState;
+  lastNarration: string | null;       // previous narration text (for variety)
+}
+
+// --- Narrator types ---
+
+export type NarrationTrigger =
+  | 'move'
+  | 'round-over'
+  | 'round-start'
+  | 'series-over'
+  | 'match-point';
+
+export type NarrationTone =
+  | 'calm'
+  | 'building'
+  | 'tense'
+  | 'explosive';
+
+export interface NarrationEvent {
+  text: string;
+  moveNumber: number;
+  trigger: NarrationTrigger;
+  intensity: number;
+  tone: NarrationTone;
 }
 
 export interface WinResult {

@@ -38,6 +38,7 @@ export function createRoom(socketId: string): { room: GameRoom; playerToken: str
     roundStartedAt: Date.now(),
     rematchRequests: new Set(),
     series: createInitialSeries(),
+    lastNarration: null,
   };
   rooms.set(roomId, room);
   socketToRoom.set(socketId, { roomId, playerToken });
@@ -172,6 +173,7 @@ export function advanceRound(room: GameRoom): void {
   room.winner = null;
   room.status = 'active';
   room.roundStartedAt = Date.now();
+  room.lastNarration = null;
 
   log('ROOM', 'round-advanced', {
     room: room.id,
@@ -263,6 +265,7 @@ export function resetSeries(room: GameRoom): void {
   room.roundStartedAt = Date.now();
   room.currentTurn = 'X';
   room.rematchRequests.clear();
+  room.lastNarration = null;
 
   log('ROOM', 'series-reset', { room: room.id });
 }

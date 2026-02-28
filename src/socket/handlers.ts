@@ -1,6 +1,6 @@
 import { Server, Socket } from 'socket.io';
 import { toggleTurn } from '../game/types';
-import type { GameRoom, Mark } from '../game/types';
+import type { GameRoom, Mark, NarrationTrigger } from '../game/types';
 import {
   createRoom,
   joinRoom,
@@ -21,6 +21,8 @@ import { isValidCell, isCellEmpty, placeMarker, checkGameResult } from '../game/
 import { getIntensity } from '../inference/gemini';
 import { analyzeIntensity } from '../inference/intensity';
 import { computeMorale, computeBoardMorale } from '../inference/morale';
+import { getNarration } from '../inference/narrator';
+import type { NarrationContext } from '../inference/narrator';
 import { log, logError, timer, formatBoard } from '../game/logger';
 
 const ROUND_TRANSITION_DELAY = 3000;
@@ -45,6 +47,40 @@ function playerCount(room: GameRoom): number {
 
 function connectedCount(room: GameRoom): number {
   return Object.values(room.players).filter(p => p.connected).length;
+}
+
+function fireNarration(
+  io: Server,
+  roomId: string,
+  room: GameRoom,
+  trigger: NarrationTrigger,
+  lastMove: { cell: number; mark: Mark },
+  moveNumber: number,
+  extra?: { roundWinner?: Mark | 'draw'; seriesWinner?: Mark | null },
+) {
+  const context: NarrationContext = {
+    board: [...room.board],
+    lastMove,
+    moveNumber,
+    currentTurn: room.currentTurn,
+    intensity: room.intensity,
+    morale: { ...room.morale },
+    series: { ...room.series, roundResults: [...room.series.roundResults], wins: { ...room.series.wins } },
+    previousNarration: room.lastNarration,
+    trigger,
+    ...extra,
+  };
+
+  getNarration(context)
+    .then((narration) => {
+      if (narration) {
+        room.lastNarration = narration.text;
+        io.to(roomId).emit('narration-update', narration);
+      }
+    })
+    .catch((err) => {
+      logError('NARR', 'emit-failed', err, { room: roomId, trigger });
+    });
 }
 
 export function registerHandlers(io: Server) {
@@ -203,11 +239,24 @@ export function registerHandlers(io: Server) {
       // --- Check game result ---
       const result = checkGameResult(room.board);
       if (result) {
+        // Save pre-update wins for match-point detection
+        const prevWinsX = room.series.wins.X;
+        const prevWinsO = room.series.wins.O;
+
         // Record the round result
         recordRoundResult(room, result.winner, room.intensity);
 
         // Check if series is decided
         const seriesDecided = checkSeriesOver(room);
+
+        // Match point detection: fires ONCE when a player reaches 2 wins (needs 1 more)
+        if (!seriesDecided) {
+          if (room.series.wins.X === 2 && prevWinsX < 2) {
+            fireNarration(io, roomId, room, 'match-point', { cell, mark }, moveNumber);
+          } else if (room.series.wins.O === 2 && prevWinsO < 2) {
+            fireNarration(io, roomId, room, 'match-point', { cell, mark }, moveNumber);
+          }
+        }
 
         // Emit round-over to room
         io.to(roomId).emit('round-over', {
@@ -225,6 +274,11 @@ export function registerHandlers(io: Server) {
             roundResults: [...room.series.roundResults],
           },
           nextRoundIn: seriesDecided ? null : ROUND_TRANSITION_DELAY,
+        });
+
+        // Narration: round-over
+        fireNarration(io, roomId, room, 'round-over', { cell, mark }, moveNumber, {
+          roundWinner: result.winner,
         });
 
         log('GAME', 'round-over', {
@@ -255,6 +309,11 @@ export function registerHandlers(io: Server) {
             peakIntensity,
             finalMorale: room.morale,
             peakMorale,
+          });
+
+          // Narration: series-over
+          fireNarration(io, roomId, room, 'series-over', { cell, mark }, moveNumber, {
+            seriesWinner: room.series.seriesWinner,
           });
 
           log('GAME', 'series-over', {
@@ -292,6 +351,12 @@ export function registerHandlers(io: Server) {
               intensity: 0,
               morale: roundStartMorale,
             });
+
+            // Narration: round-start
+            const lastRoundMove = currentRoom.moveHistory.length > 0
+              ? { cell: currentRoom.moveHistory[currentRoom.moveHistory.length - 1].cell, mark: currentRoom.moveHistory[currentRoom.moveHistory.length - 1].mark }
+              : { cell: 0, mark: currentRoom.currentTurn };
+            fireNarration(io, roomId, currentRoom, 'round-start', lastRoundMove, 0);
 
             log('GAME', 'round-start', {
               room: roomId,
@@ -369,6 +434,9 @@ export function registerHandlers(io: Server) {
             ms: inferTimer(),
           });
         });
+
+      // --- Fire narration in background (non-blocking) ---
+      fireNarration(io, roomId, room, 'move', { cell, mark }, moveNumber);
     });
 
     // === NEW SERIES ===
@@ -406,6 +474,10 @@ export function registerHandlers(io: Server) {
           intensity: 0,
           morale: newSeriesMorale,
         });
+
+        // Narration: round-start (new series)
+        fireNarration(io, room.id, room, 'round-start', { cell: 0, mark: room.currentTurn }, 0);
+
         log('ROOM', 'new-series-started', { room: room.id });
       } else {
         log('ROOM', 'new-series-waiting', { room: room.id });
