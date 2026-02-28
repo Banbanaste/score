@@ -39,3 +39,14 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# new
+npm-cache
+.agent
+.agents
+.claude
+.claude-flow
+.claude-flow.json
+.swarm
+.swarms
+.mcp.json
