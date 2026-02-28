@@ -12,18 +12,29 @@
 </head>
 
 <body>
-  <div id="container">
+  <div id="arena">
+    <div id="stands-left" class="stands">
+      <div class="stands-title">Team Blue</div>
+      <div class="stands-rows">
+        <div class="stand-row"></div>
+        <div class="stand-row"></div>
+        <div class="stand-row"></div>
+        <div class="stand-row"></div>
+        <div class="stand-row"></div>
+      </div>
+    </div>
+    <div id="container">
     <h1>Tic-Tac-Toe</h1>
     <div id="cellcontainer">
-      <div cellIndex="0" class="cell"></div>
-      <div cellIndex="1" class="cell"></div>
-      <div cellIndex="2" class="cell"></div>
-      <div cellIndex="3" class="cell"></div>
-      <div cellIndex="4" class="cell"></div>
-      <div cellIndex="5" class="cell"></div>
-      <div cellIndex="6" class="cell"></div>
-      <div cellIndex="7" class="cell"></div>
-      <div cellIndex="8" class="cell"></div>
+      <div cellIndex="0" class="cell"><span class="cell-num">1</span><span class="cell-mark"></span></div>
+      <div cellIndex="1" class="cell"><span class="cell-num">2</span><span class="cell-mark"></span></div>
+      <div cellIndex="2" class="cell"><span class="cell-num">3</span><span class="cell-mark"></span></div>
+      <div cellIndex="3" class="cell"><span class="cell-num">4</span><span class="cell-mark"></span></div>
+      <div cellIndex="4" class="cell"><span class="cell-num">5</span><span class="cell-mark"></span></div>
+      <div cellIndex="5" class="cell"><span class="cell-num">6</span><span class="cell-mark"></span></div>
+      <div cellIndex="6" class="cell"><span class="cell-num">7</span><span class="cell-mark"></span></div>
+      <div cellIndex="7" class="cell"><span class="cell-num">8</span><span class="cell-mark"></span></div>
+      <div cellIndex="8" class="cell"><span class="cell-num">9</span><span class="cell-mark"></span></div>
     </div>
     <h2 id="turn"></h2>
     <div id="controls">
@@ -33,10 +44,24 @@
         <option value="normalai">Normal-AI vs Human</option>
       </select>
       <button id="restart">Restart</button>
-
+    </div>
+    <div id="move-tracking">
+      <h3>Moves</h3>
+      <ul id="move-list"></ul>
+    </div>
+    </div>
+    <div id="stands-right" class="stands">
+      <div class="stands-title">Team Red</div>
+      <div class="stands-rows">
+        <div class="stand-row"></div>
+        <div class="stand-row"></div>
+        <div class="stand-row"></div>
+        <div class="stand-row"></div>
+        <div class="stand-row"></div>
+      </div>
     </div>
   </div>
-  <script src="main.js"></script>
+  <script type="module" src="main.js"></script>
 </body>
 
 </html>

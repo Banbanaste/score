@@ -1,7 +1,17 @@
+import { recordMove } from "./api.js";
+
 const cells = document.querySelectorAll(".cell");
 const turn = document.querySelector("#turn");
 const restart = document.querySelector("#restart");
 const modeSelector = document.querySelector("#mode");
+const moveList = document.querySelector("#move-list");
+
+const positionNames = [
+    "top left", "top center", "top right",
+    "middle left", "center", "middle right",
+    "bottom left", "bottom center", "bottom right"
+];
+
 const win = [
     [0, 1, 2],
     [3, 4, 5],
@@ -49,8 +59,21 @@ function clicked() {
 
 function update(cell, index) {
     options[index] = currplayer;
-    cell.textContent = currplayer;
-    cell.classList.add(currplayer == "X" ? "red" : "blue");
+    const mark = cell.querySelector(".cell-mark");
+    mark.textContent = currplayer;
+    mark.classList.add(currplayer == "X" ? "red" : "blue");
+    addMoveToLog(currplayer, index);
+}
+
+function addMoveToLog(player, cellIndex) {
+    const position = positionNames[cellIndex];
+    const item = document.createElement("li");
+    item.textContent = `${player}: ${position}`;
+    item.classList.add(player === "X" ? "red" : "blue");
+    moveList.appendChild(item);
+
+    // Send move to backend (no-op until API_BASE_URL is set in api.js)
+    recordMove({ player, cellIndex, position });
 }
 
 function changeplayer() {
@@ -90,9 +113,11 @@ function restarting() {
     options = ["", "", "", "", "", "", "", "", ""];
     turn.textContent = `${currplayer}'s Turn`;
     cells.forEach((cell) => {
-        cell.textContent = "";
-        cell.classList.remove("red", "blue");
+        const mark = cell.querySelector(".cell-mark");
+        mark.textContent = "";
+        mark.classList.remove("red", "blue");
     });
+    moveList.innerHTML = "";
     running = true;
 }
 
