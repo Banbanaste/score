@@ -1,7 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
-import type { Board, Mark, SeriesState } from '@/game/types';
+import type { Board, Mark, SeriesState } from '../game/types';
 import { analyzeIntensity, computeSeriesPressure } from './intensity';
-import { log, logError, timer } from '@/game/logger';
+import { log, logError, timer } from '../game/logger';
 
 export interface IntensityResult {
   value: number;

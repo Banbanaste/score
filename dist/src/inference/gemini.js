@@ -3,7 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getIntensity = getIntensity;
 const genai_1 = require("@google/genai");
 const intensity_1 = require("./intensity");
-const logger_1 = require("@/game/logger");
+const logger_1 = require("../game/logger");
 const SYSTEM_PROMPT = `You are a game-state analyzer for Tic-Tac-Toe.
 Analyze the board and return a JSON object with a single field 'intensity' (0.0 to 1.0) representing the current tension/drama of the game state.
 
