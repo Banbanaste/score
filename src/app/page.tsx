@@ -73,7 +73,7 @@ export default function Home() {
             type="text"
             value={joinCode}
             onChange={e => setJoinCode(e.target.value)}
-            placeholder="Room Code"
+            placeholder="Room code (6 chars)"
             maxLength={6}
             className="flex-1 bg-gray-900 border border-gray-700 px-3 py-2 rounded text-center font-mono"
           />
@@ -85,6 +85,13 @@ export default function Home() {
             Join
           </button>
         </div>
+
+        <a
+          href="/tictactoe/index.html"
+          className="text-gray-500 hover:text-gray-300 text-sm text-center transition-colors"
+        >
+          Play solo (no server)
+        </a>
       </div>
     </main>
   );

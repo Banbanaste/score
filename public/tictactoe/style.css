@@ -136,10 +136,16 @@ h1 {
     justify-content: center;
     width: 100px;
     height: 100px;
+    min-width: 100px;
+    min-height: 100px;
+    max-width: 100px;
+    max-height: 100px;
+    box-sizing: border-box;
+    overflow: hidden;
     background: #fafafa;
     border: 2px solid #ccc;
     box-shadow: 0 0 5px rgba(0, 0, 0, 0.1);
-    font-size: 60px;
+    font-size: 52px;
     font-weight: bold;
     cursor: pointer;
     transition: background 0.3s;
@@ -156,8 +162,16 @@ h1 {
 }
 
 .cell-mark {
-    font-size: 60px;
+    font-size: 0.95em;
+    line-height: 1;
     font-weight: bold;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    min-height: 0;
+    max-width: 100%;
+    max-height: 100%;
 }
 
 .cell:hover {
@@ -268,8 +282,11 @@ button:hover {
     .cell {
         width: 80px;
         height: 80px;
-        line-height: 80px;
-        font-size: 50px;
+        min-width: 80px;
+        min-height: 80px;
+        max-width: 80px;
+        max-height: 80px;
+        font-size: 42px;
     }
 
     select,
@@ -307,8 +324,11 @@ button:hover {
     .cell {
         width: 60px;
         height: 60px;
-        line-height: 60px;
-        font-size: 40px;
+        min-width: 60px;
+        min-height: 60px;
+        max-width: 60px;
+        max-height: 60px;
+        font-size: 32px;
     }
 
     select,
