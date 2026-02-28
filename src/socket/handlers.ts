@@ -20,6 +20,7 @@ import {
 import { isValidCell, isCellEmpty, placeMarker, checkGameResult } from '../game/engine';
 import { getIntensity } from '../inference/gemini';
 import { analyzeIntensity } from '../inference/intensity';
+import { computeMorale, computeBoardMorale } from '../inference/morale';
 import { log, logError, timer, formatBoard } from '../game/logger';
 
 const ROUND_TRANSITION_DELAY = 3000;
@@ -102,6 +103,7 @@ export function registerHandlers(io: Server) {
               Object.entries(room.players).map(([, p]) => [p.mark, { mark: p.mark }])
             ),
             intensity: 0,
+            morale: room.morale,
             series: {
               currentRound: room.series.currentRound,
               maxRounds: room.series.maxRounds,
@@ -174,6 +176,10 @@ export function registerHandlers(io: Server) {
       const heuristicIntensity = analyzeIntensity(room.board, room.currentTurn);
       room.intensity = heuristicIntensity;
 
+      // Instant heuristic morale (synchronous)
+      const heuristicMorale = computeBoardMorale(room.board, room.currentTurn);
+      room.morale = heuristicMorale;
+
       // Record move with heuristic value (will be upgraded when Gemini returns)
       const moveIndex = room.moveHistory.length;
       room.moveHistory.push({
@@ -181,6 +187,7 @@ export function registerHandlers(io: Server) {
         mark,
         timestamp: Date.now(),
         intensity: heuristicIntensity,
+        morale: { ...heuristicMorale },
       });
 
       log('GAME', 'move-placed', {
@@ -209,6 +216,7 @@ export function registerHandlers(io: Server) {
           winningCells: result.winningCells,
           board: room.board,
           finalIntensity: room.intensity,
+          finalMorale: room.morale,
           series: {
             wins: { ...room.series.wins },
             currentRound: room.series.currentRound,
@@ -234,12 +242,19 @@ export function registerHandlers(io: Server) {
           const totalMoves = room.series.roundResults.reduce((sum, r) => sum + r.moves, 0);
           const peakIntensity = Math.max(...room.series.roundResults.map(r => r.finalIntensity), 0);
 
+          const peakMorale = {
+            X: Math.max(...room.series.roundResults.map(r => r.finalMorale.X), 0),
+            O: Math.max(...room.series.roundResults.map(r => r.finalMorale.O), 0),
+          };
+
           io.to(roomId).emit('series-over', {
             seriesWinner: room.series.seriesWinner,
             finalScore: { ...room.series.wins },
             rounds: room.series.roundResults.map(r => ({ round: r.round, winner: r.winner, moves: r.moves })),
             totalMoves,
             peakIntensity,
+            finalMorale: room.morale,
+            peakMorale,
           });
 
           log('GAME', 'series-over', {
@@ -257,6 +272,14 @@ export function registerHandlers(io: Server) {
 
             advanceRound(currentRoom);
 
+            // Series morale carries forward; board is empty so board morale ≈ 0
+            const lastWinner: Mark | 'draw' | null =
+              currentRoom.series.roundResults.length > 0
+                ? currentRoom.series.roundResults[currentRoom.series.roundResults.length - 1].winner
+                : null;
+            const roundStartMorale = computeMorale(currentRoom.board, currentRoom.currentTurn, currentRoom.series, lastWinner);
+            currentRoom.morale = roundStartMorale;
+
             io.to(roomId).emit('round-start', {
               round: currentRoom.series.currentRound,
               board: currentRoom.board,
@@ -267,6 +290,7 @@ export function registerHandlers(io: Server) {
                 maxRounds: currentRoom.series.maxRounds,
               },
               intensity: 0,
+              morale: roundStartMorale,
             });
 
             log('GAME', 'round-start', {
@@ -284,6 +308,7 @@ export function registerHandlers(io: Server) {
           mark,
           currentTurn: room.currentTurn,
           intensity: room.intensity,
+          morale: room.morale,
           moveNumber,
           series: {
             currentRound: room.series.currentRound,
@@ -301,14 +326,21 @@ export function registerHandlers(io: Server) {
       // --- Fire Gemini in background (non-blocking) ---
       const inferTimer = timer();
       const boardSnapshot = [...room.board];
-      getIntensity(boardSnapshot, mark, moveNumber, room.series)
+      // Determine last round winner for full morale computation
+      const lastRoundWinner: Mark | 'draw' | null =
+        room.series.roundResults.length > 0
+          ? room.series.roundResults[room.series.roundResults.length - 1].winner
+          : null;
+      getIntensity(boardSnapshot, mark, moveNumber, room.series, lastRoundWinner)
         .then((intensityResult) => {
           const elapsed = inferTimer();
 
           // Only update if room still exists and hasn't been reset (rematch)
           if (room.moveHistory.length >= moveNumber) {
             room.intensity = intensityResult.value;
+            room.morale = intensityResult.morale;
             room.moveHistory[moveIndex].intensity = intensityResult.value;
+            room.moveHistory[moveIndex].morale = { ...intensityResult.morale };
           }
 
           io.to(roomId).emit('intensity-update', {
@@ -316,6 +348,7 @@ export function registerHandlers(io: Server) {
             source: intensityResult.source,
             moveNumber,
             seriesPressure: intensityResult.seriesPressure,
+            morale: intensityResult.morale,
           });
 
           log('INFER', 'intensity-resolved', {
@@ -324,6 +357,8 @@ export function registerHandlers(io: Server) {
             value: intensityResult.value.toFixed(2),
             source: intensityResult.source,
             delta: (intensityResult.value - heuristicIntensity).toFixed(2),
+            moraleX: intensityResult.morale.X.toFixed(2),
+            moraleO: intensityResult.morale.O.toFixed(2),
             ms: elapsed,
           });
         })
@@ -355,6 +390,10 @@ export function registerHandlers(io: Server) {
 
       const started = requestRematch(room, playerToken);
       if (started) {
+        // New series: no last round winner, series morale is zero
+        const newSeriesMorale = computeMorale(room.board, room.currentTurn, room.series, null);
+        room.morale = newSeriesMorale;
+
         io.to(room.id).emit('round-start', {
           round: room.series.currentRound,
           board: room.board,
@@ -365,6 +404,7 @@ export function registerHandlers(io: Server) {
             maxRounds: room.series.maxRounds,
           },
           intensity: 0,
+          morale: newSeriesMorale,
         });
         log('ROOM', 'new-series-started', { room: room.id });
       } else {
@@ -395,6 +435,7 @@ export function registerHandlers(io: Server) {
         currentTurn: room.currentTurn,
         mark,
         intensity: room.intensity,
+        morale: room.morale,
         status: room.status,
         moveHistory: room.moveHistory,
         series: {
@@ -485,6 +526,7 @@ export function registerHandlers(io: Server) {
               winner: winnerMark,
               board: forfeited.board,
               finalIntensity: forfeited.intensity,
+              finalMorale: forfeited.morale,
               series: {
                 wins: { ...forfeited.series.wins },
                 currentRound: forfeited.series.currentRound,
@@ -498,12 +540,18 @@ export function registerHandlers(io: Server) {
             // Emit series-over (forfeit ends the whole series)
             const totalMoves = forfeited.series.roundResults.reduce((sum, r) => sum + r.moves, 0);
             const peakIntensity = Math.max(...forfeited.series.roundResults.map(r => r.finalIntensity), 0);
+            const forfeitPeakMorale = {
+              X: Math.max(...forfeited.series.roundResults.map(r => r.finalMorale.X), 0),
+              O: Math.max(...forfeited.series.roundResults.map(r => r.finalMorale.O), 0),
+            };
             io.to(opponentSocketId).emit('series-over', {
               seriesWinner: winnerMark,
               finalScore: { ...forfeited.series.wins },
               rounds: forfeited.series.roundResults.map(r => ({ round: r.round, winner: r.winner, moves: r.moves })),
               totalMoves,
               peakIntensity,
+              finalMorale: forfeited.morale,
+              peakMorale: forfeitPeakMorale,
             });
 
             log('GAME', 'series-over', {

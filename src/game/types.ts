@@ -4,11 +4,17 @@ export type Board = Cell[];  // length 9
 
 export type RoomStatus = 'waiting' | 'active' | 'round-over' | 'finished';
 
+export interface MoraleState {
+  X: number;   // -1.0 to +1.0
+  O: number;   // -1.0 to +1.0
+}
+
 export interface Move {
   cell: number;       // 0–8
   mark: Mark;
   timestamp: number;
   intensity: number;  // intensity AFTER this move
+  morale: MoraleState; // per-player morale AFTER this move
 }
 
 export interface PlayerIdentity {
@@ -23,6 +29,7 @@ export interface RoundResult {
   moves: number;
   duration: number;        // ms
   finalIntensity: number;
+  finalMorale: MoraleState;
 }
 
 export interface SeriesState {
@@ -42,6 +49,7 @@ export interface GameRoom {
   status: RoomStatus;
   winner: Mark | 'draw' | null;
   intensity: number;                        // 0.0–1.0
+  morale: MoraleState;                      // per-player morale (-1.0 to +1.0)
   moveHistory: Move[];
   createdAt: number;
   roundStartedAt: number;                   // timestamp when current round began

@@ -1,10 +1,32 @@
 'use client';
 
+function getMoraleLabel(value: number): string {
+  if (value <= -0.7) return 'Despair';
+  if (value <= -0.3) return 'Pressured';
+  if (value <= 0.3) return 'Neutral';
+  if (value <= 0.7) return 'Confident';
+  return 'Dominant';
+}
+
+function getMoraleColor(value: number): string {
+  if (value <= -0.7) return 'text-purple-400';
+  if (value <= -0.3) return 'text-blue-300';
+  if (value <= 0.3) return 'text-gray-400';
+  if (value <= 0.7) return 'text-yellow-400';
+  return 'text-green-400';
+}
+
+function formatMorale(value: number): string {
+  const sign = value >= 0 ? '+' : '';
+  return `${sign}${value.toFixed(2)}`;
+}
+
 interface RoundResultOverlayProps {
   winner: string | null;
   round: number;
   series: { wins: { X: number; O: number } };
   countdown: number | null;
+  morale?: { X: number; O: number };
   onDismiss?: () => void;
 }
 
@@ -13,6 +35,7 @@ export default function RoundResultOverlay({
   round,
   series,
   countdown,
+  morale,
   onDismiss,
 }: RoundResultOverlayProps) {
   const isDraw = winner === 'draw';
@@ -48,6 +71,25 @@ export default function RoundResultOverlay({
           <span className="font-mono text-white text-xl">{series.wins.O}</span>{' '}
           <span className="text-red-400 font-bold">O</span>
         </div>
+
+        {morale && (
+          <div className="flex justify-center gap-4 text-xs font-mono">
+            <span>
+              <span className="text-blue-400 font-bold">X</span>
+              {': '}
+              <span className={getMoraleColor(morale.X)}>
+                {getMoraleLabel(morale.X)} ({formatMorale(morale.X)})
+              </span>
+            </span>
+            <span>
+              <span className="text-red-400 font-bold">O</span>
+              {': '}
+              <span className={getMoraleColor(morale.O)}>
+                {getMoraleLabel(morale.O)} ({formatMorale(morale.O)})
+              </span>
+            </span>
+          </div>
+        )}
 
         {countdown !== null && countdown > 0 && (
           <div className="text-gray-400 text-sm font-mono">

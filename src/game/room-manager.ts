@@ -32,6 +32,7 @@ export function createRoom(socketId: string): { room: GameRoom; playerToken: str
     status: 'waiting',
     winner: null,
     intensity: 0,
+    morale: { X: 0, O: 0 },
     moveHistory: [],
     createdAt: Date.now(),
     roundStartedAt: Date.now(),
@@ -167,6 +168,7 @@ export function advanceRound(room: GameRoom): void {
   room.currentTurn = roundStartingTurn(room.series.currentRound);
   room.moveHistory = [];
   room.intensity = 0;
+  room.morale = { X: 0, O: 0 };
   room.winner = null;
   room.status = 'active';
   room.roundStartedAt = Date.now();
@@ -187,6 +189,7 @@ export function recordRoundResult(room: GameRoom, winner: Mark | 'draw', finalIn
     moves: room.moveHistory.length,
     duration: Date.now() - room.roundStartedAt,
     finalIntensity,
+    finalMorale: { ...room.morale },
   });
 
   if (winner !== 'draw') {
@@ -254,6 +257,7 @@ export function resetSeries(room: GameRoom): void {
   room.board = createEmptyBoard();
   room.moveHistory = [];
   room.intensity = 0;
+  room.morale = { X: 0, O: 0 };
   room.winner = null;
   room.status = 'active';
   room.roundStartedAt = Date.now();

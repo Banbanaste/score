@@ -6,12 +6,19 @@ interface RoundSummary {
   moves: number;
 }
 
+function formatMorale(value: number): string {
+  const sign = value >= 0 ? '+' : '';
+  return `${sign}${value.toFixed(2)}`;
+}
+
 interface SeriesResultProps {
   seriesWinner: string | null;
   finalScore: { X: number; O: number };
   rounds: RoundSummary[];
   totalMoves: number;
   peakIntensity: number;
+  peakMorale?: { X: number; O: number };
+  finalMorale?: { X: number; O: number };
   onNewSeries: () => void;
 }
 
@@ -21,6 +28,8 @@ export default function SeriesResult({
   rounds,
   totalMoves,
   peakIntensity,
+  peakMorale,
+  finalMorale,
   onNewSeries,
 }: SeriesResultProps) {
   const isDraw = seriesWinner === null;
@@ -79,6 +88,32 @@ export default function SeriesResult({
             <span className="text-white font-mono">{totalMoves}</span>
           </div>
         </div>
+
+        {(peakMorale || finalMorale) && (
+          <div className="border-t border-gray-700 pt-4 text-sm text-gray-400 space-y-1">
+            <div className="text-gray-300 font-bold text-xs uppercase tracking-wider">Morale</div>
+            {peakMorale && (
+              <div className="flex justify-between">
+                <span>Peak morale</span>
+                <span className="font-mono text-white">
+                  <span className="text-blue-400">X</span> {formatMorale(peakMorale.X)}
+                  <span className="text-gray-600 mx-1">/</span>
+                  <span className="text-red-400">O</span> {formatMorale(peakMorale.O)}
+                </span>
+              </div>
+            )}
+            {finalMorale && (
+              <div className="flex justify-between">
+                <span>Final morale</span>
+                <span className="font-mono text-white">
+                  <span className="text-blue-400">X</span> {formatMorale(finalMorale.X)}
+                  <span className="text-gray-600 mx-1">/</span>
+                  <span className="text-red-400">O</span> {formatMorale(finalMorale.O)}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
 
         <button
           onClick={onNewSeries}

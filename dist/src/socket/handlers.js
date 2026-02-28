@@ -6,6 +6,7 @@ const room_manager_1 = require("../game/room-manager");
 const engine_1 = require("../game/engine");
 const gemini_1 = require("../inference/gemini");
 const intensity_1 = require("../inference/intensity");
+const morale_1 = require("../inference/morale");
 const logger_1 = require("../game/logger");
 const ROUND_TRANSITION_DELAY = 3000;
 function emitError(socket, code, message) {
@@ -73,6 +74,7 @@ function registerHandlers(io) {
                         currentTurn: room.currentTurn,
                         players: Object.fromEntries(Object.entries(room.players).map(([, p]) => [p.mark, { mark: p.mark }])),
                         intensity: 0,
+                        morale: room.morale,
                         series: {
                             currentRound: room.series.currentRound,
                             maxRounds: room.series.maxRounds,
@@ -136,6 +138,9 @@ function registerHandlers(io) {
             // Instant heuristic intensity (synchronous, ~0ms)
             const heuristicIntensity = (0, intensity_1.analyzeIntensity)(room.board, room.currentTurn);
             room.intensity = heuristicIntensity;
+            // Instant heuristic morale (synchronous)
+            const heuristicMorale = (0, morale_1.computeBoardMorale)(room.board, room.currentTurn);
+            room.morale = heuristicMorale;
             // Record move with heuristic value (will be upgraded when Gemini returns)
             const moveIndex = room.moveHistory.length;
             room.moveHistory.push({
@@ -143,6 +148,7 @@ function registerHandlers(io) {
                 mark,
                 timestamp: Date.now(),
                 intensity: heuristicIntensity,
+                morale: { ...heuristicMorale },
             });
             (0, logger_1.log)('GAME', 'move-placed', {
                 room: roomId,
@@ -167,6 +173,7 @@ function registerHandlers(io) {
                     winningCells: result.winningCells,
                     board: room.board,
                     finalIntensity: room.intensity,
+                    finalMorale: room.morale,
                     series: {
                         wins: { ...room.series.wins },
                         currentRound: room.series.currentRound,
@@ -189,12 +196,18 @@ function registerHandlers(io) {
                     room.status = 'finished';
                     const totalMoves = room.series.roundResults.reduce((sum, r) => sum + r.moves, 0);
                     const peakIntensity = Math.max(...room.series.roundResults.map(r => r.finalIntensity), 0);
+                    const peakMorale = {
+                        X: Math.max(...room.series.roundResults.map(r => r.finalMorale.X), 0),
+                        O: Math.max(...room.series.roundResults.map(r => r.finalMorale.O), 0),
+                    };
                     io.to(roomId).emit('series-over', {
                         seriesWinner: room.series.seriesWinner,
                         finalScore: { ...room.series.wins },
                         rounds: room.series.roundResults.map(r => ({ round: r.round, winner: r.winner, moves: r.moves })),
                         totalMoves,
                         peakIntensity,
+                        finalMorale: room.morale,
+                        peakMorale,
                     });
                     (0, logger_1.log)('GAME', 'series-over', {
                         room: roomId,
@@ -211,6 +224,12 @@ function registerHandlers(io) {
                         if (!currentRoom || currentRoom.status !== 'round-over')
                             return;
                         (0, room_manager_1.advanceRound)(currentRoom);
+                        // Series morale carries forward; board is empty so board morale ≈ 0
+                        const lastWinner = currentRoom.series.roundResults.length > 0
+                            ? currentRoom.series.roundResults[currentRoom.series.roundResults.length - 1].winner
+                            : null;
+                        const roundStartMorale = (0, morale_1.computeMorale)(currentRoom.board, currentRoom.currentTurn, currentRoom.series, lastWinner);
+                        currentRoom.morale = roundStartMorale;
                         io.to(roomId).emit('round-start', {
                             round: currentRoom.series.currentRound,
                             board: currentRoom.board,
@@ -221,6 +240,7 @@ function registerHandlers(io) {
                                 maxRounds: currentRoom.series.maxRounds,
                             },
                             intensity: 0,
+                            morale: roundStartMorale,
                         });
                         (0, logger_1.log)('GAME', 'round-start', {
                             room: roomId,
@@ -238,6 +258,7 @@ function registerHandlers(io) {
                     mark,
                     currentTurn: room.currentTurn,
                     intensity: room.intensity,
+                    morale: room.morale,
                     moveNumber,
                     series: {
                         currentRound: room.series.currentRound,
@@ -254,19 +275,26 @@ function registerHandlers(io) {
             // --- Fire Gemini in background (non-blocking) ---
             const inferTimer = (0, logger_1.timer)();
             const boardSnapshot = [...room.board];
-            (0, gemini_1.getIntensity)(boardSnapshot, mark, moveNumber, room.series)
+            // Determine last round winner for full morale computation
+            const lastRoundWinner = room.series.roundResults.length > 0
+                ? room.series.roundResults[room.series.roundResults.length - 1].winner
+                : null;
+            (0, gemini_1.getIntensity)(boardSnapshot, mark, moveNumber, room.series, lastRoundWinner)
                 .then((intensityResult) => {
                 const elapsed = inferTimer();
                 // Only update if room still exists and hasn't been reset (rematch)
                 if (room.moveHistory.length >= moveNumber) {
                     room.intensity = intensityResult.value;
+                    room.morale = intensityResult.morale;
                     room.moveHistory[moveIndex].intensity = intensityResult.value;
+                    room.moveHistory[moveIndex].morale = { ...intensityResult.morale };
                 }
                 io.to(roomId).emit('intensity-update', {
                     intensity: intensityResult.value,
                     source: intensityResult.source,
                     moveNumber,
                     seriesPressure: intensityResult.seriesPressure,
+                    morale: intensityResult.morale,
                 });
                 (0, logger_1.log)('INFER', 'intensity-resolved', {
                     room: roomId,
@@ -274,6 +302,8 @@ function registerHandlers(io) {
                     value: intensityResult.value.toFixed(2),
                     source: intensityResult.source,
                     delta: (intensityResult.value - heuristicIntensity).toFixed(2),
+                    moraleX: intensityResult.morale.X.toFixed(2),
+                    moraleO: intensityResult.morale.O.toFixed(2),
                     ms: elapsed,
                 });
             })
@@ -301,6 +331,9 @@ function registerHandlers(io) {
             (0, logger_1.log)('ROOM', 'new-series-request', { room: room.id, mark: playerMark, sid });
             const started = (0, room_manager_1.requestRematch)(room, playerToken);
             if (started) {
+                // New series: no last round winner, series morale is zero
+                const newSeriesMorale = (0, morale_1.computeMorale)(room.board, room.currentTurn, room.series, null);
+                room.morale = newSeriesMorale;
                 io.to(room.id).emit('round-start', {
                     round: room.series.currentRound,
                     board: room.board,
@@ -311,6 +344,7 @@ function registerHandlers(io) {
                         maxRounds: room.series.maxRounds,
                     },
                     intensity: 0,
+                    morale: newSeriesMorale,
                 });
                 (0, logger_1.log)('ROOM', 'new-series-started', { room: room.id });
             }
@@ -337,6 +371,7 @@ function registerHandlers(io) {
                 currentTurn: room.currentTurn,
                 mark,
                 intensity: room.intensity,
+                morale: room.morale,
                 status: room.status,
                 moveHistory: room.moveHistory,
                 series: {
@@ -414,6 +449,7 @@ function registerHandlers(io) {
                             winner: winnerMark,
                             board: forfeited.board,
                             finalIntensity: forfeited.intensity,
+                            finalMorale: forfeited.morale,
                             series: {
                                 wins: { ...forfeited.series.wins },
                                 currentRound: forfeited.series.currentRound,
@@ -426,12 +462,18 @@ function registerHandlers(io) {
                         // Emit series-over (forfeit ends the whole series)
                         const totalMoves = forfeited.series.roundResults.reduce((sum, r) => sum + r.moves, 0);
                         const peakIntensity = Math.max(...forfeited.series.roundResults.map(r => r.finalIntensity), 0);
+                        const forfeitPeakMorale = {
+                            X: Math.max(...forfeited.series.roundResults.map(r => r.finalMorale.X), 0),
+                            O: Math.max(...forfeited.series.roundResults.map(r => r.finalMorale.O), 0),
+                        };
                         io.to(opponentSocketId).emit('series-over', {
                             seriesWinner: winnerMark,
                             finalScore: { ...forfeited.series.wins },
                             rounds: forfeited.series.roundResults.map(r => ({ round: r.round, winner: r.winner, moves: r.moves })),
                             totalMoves,
                             peakIntensity,
+                            finalMorale: forfeited.morale,
+                            peakMorale: forfeitPeakMorale,
                         });
                         (0, logger_1.log)('GAME', 'series-over', {
                             room: room.id,

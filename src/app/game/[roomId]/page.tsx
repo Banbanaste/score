@@ -6,6 +6,7 @@ import { useSocket } from '@/hooks/use-socket';
 import GameBoard from '@/components/game-board';
 import GameStatus from '@/components/game-status';
 import IntensityMeter from '@/components/intensity-meter';
+import MoraleIndicator from '@/components/morale-indicator';
 import ConnectionStatus from '@/components/connection-status';
 import EventDebugPanel from '@/components/event-debug-panel';
 import SeriesScoreboard from '@/components/series-scoreboard';
@@ -26,6 +27,8 @@ interface SeriesOverData {
   rounds: Array<{ round: number; winner: string; moves: number }>;
   totalMoves: number;
   peakIntensity: number;
+  peakMorale?: { X: number; O: number };
+  finalMorale?: { X: number; O: number };
 }
 
 export default function GamePage() {
@@ -41,6 +44,7 @@ export default function GamePage() {
   const [winner, setWinner] = useState<string | null>(null);
   const [intensity, setIntensity] = useState(0);
   const [winningCells, setWinningCells] = useState<number[] | null>(null);
+  const [morale, setMorale] = useState<{ X: number; O: number }>({ X: 0, O: 0 });
   const [opponentDisconnected, setOpponentDisconnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -92,6 +96,7 @@ export default function GamePage() {
       setBoard(data.board);
       setCurrentTurn(data.currentTurn);
       setIntensity(data.intensity);
+      setMorale({ X: 0, O: 0 });
       setStatus('active');
       setWinner(null);
       setWinningCells(null);
@@ -107,10 +112,12 @@ export default function GamePage() {
       board: (string | null)[];
       currentTurn: string;
       intensity: number;
+      morale?: { X: number; O: number };
     }) => {
       setBoard(data.board);
       setCurrentTurn(data.currentTurn);
       setIntensity(data.intensity);
+      if (data.morale) setMorale(data.morale);
     });
 
     // Async intensity upgrade from Gemini (arrives after move-made)
@@ -118,11 +125,13 @@ export default function GamePage() {
       intensity: number;
       source: string;
       moveNumber: number;
+      morale?: { X: number; O: number };
     }) => {
       setIntensity(data.intensity);
       if (data.intensity > peakIntensityRef.current) {
         peakIntensityRef.current = data.intensity;
       }
+      if (data.morale) setMorale(data.morale);
     });
 
     socket.on('round-over', (data: {
@@ -131,6 +140,7 @@ export default function GamePage() {
       winningCells?: number[];
       board: (string | null)[];
       finalIntensity: number;
+      finalMorale?: { X: number; O: number };
       series: SeriesLocal;
       nextRoundIn: number | null;
     }) => {
@@ -141,6 +151,7 @@ export default function GamePage() {
       if (data.finalIntensity > peakIntensityRef.current) {
         peakIntensityRef.current = data.finalIntensity;
       }
+      if (data.finalMorale) setMorale(data.finalMorale);
       setStatus('round-over');
       setSeries(data.series);
       setRoundResult({ winner: data.winner, round: data.round });
@@ -165,10 +176,12 @@ export default function GamePage() {
       currentTurn: string;
       series: SeriesLocal;
       intensity: number;
+      morale?: { X: number; O: number };
     }) => {
       setBoard(data.board);
       setCurrentTurn(data.currentTurn);
       setIntensity(data.intensity);
+      if (data.morale) setMorale(data.morale);
       setSeries(data.series);
       setStatus('active');
       setWinner(null);
@@ -188,6 +201,7 @@ export default function GamePage() {
       currentTurn: string;
       mark: string;
       intensity: number;
+      morale?: { X: number; O: number };
       status: string;
       series?: SeriesLocal;
     }) => {
@@ -195,6 +209,7 @@ export default function GamePage() {
       setCurrentTurn(data.currentTurn);
       setMyMark(data.mark);
       setIntensity(data.intensity);
+      if (data.morale) setMorale(data.morale);
       setStatus(data.status);
       sessionStorage.setItem('myMark', data.mark);
       if (data.series) setSeries(data.series);
@@ -271,7 +286,7 @@ export default function GamePage() {
         </button>
       </div>
 
-      <SeriesScoreboard series={series} />
+      <SeriesScoreboard series={series} morale={morale} />
 
       <GameStatus
         roomId={roomId}
@@ -289,6 +304,7 @@ export default function GamePage() {
       />
 
       <IntensityMeter intensity={intensity} />
+      <MoraleIndicator morale={morale} myMark={myMark} />
 
       {opponentDisconnected && (
         <div className="text-yellow-400 bg-yellow-900/30 px-4 py-2 rounded text-sm">
@@ -306,6 +322,7 @@ export default function GamePage() {
           round={roundResult.round}
           series={series}
           countdown={countdown}
+          morale={morale}
         />
       )}
 
@@ -316,6 +333,8 @@ export default function GamePage() {
           rounds={seriesResult.rounds}
           totalMoves={seriesResult.totalMoves}
           peakIntensity={seriesResult.peakIntensity}
+          peakMorale={seriesResult.peakMorale}
+          finalMorale={seriesResult.finalMorale}
           onNewSeries={handleNewSeries}
         />
       )}

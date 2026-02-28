@@ -44,6 +44,7 @@ function createRoom(socketId) {
         status: 'waiting',
         winner: null,
         intensity: 0,
+        morale: { X: 0, O: 0 },
         moveHistory: [],
         createdAt: Date.now(),
         roundStartedAt: Date.now(),
@@ -162,6 +163,7 @@ function advanceRound(room) {
     room.currentTurn = (0, types_1.roundStartingTurn)(room.series.currentRound);
     room.moveHistory = [];
     room.intensity = 0;
+    room.morale = { X: 0, O: 0 };
     room.winner = null;
     room.status = 'active';
     room.roundStartedAt = Date.now();
@@ -179,6 +181,7 @@ function recordRoundResult(room, winner, finalIntensity) {
         moves: room.moveHistory.length,
         duration: Date.now() - room.roundStartedAt,
         finalIntensity,
+        finalMorale: { ...room.morale },
     });
     if (winner !== 'draw') {
         room.series.wins[winner]++;
@@ -239,6 +242,7 @@ function resetSeries(room) {
     room.board = (0, types_1.createEmptyBoard)();
     room.moveHistory = [];
     room.intensity = 0;
+    room.morale = { X: 0, O: 0 };
     room.winner = null;
     room.status = 'active';
     room.roundStartedAt = Date.now();
