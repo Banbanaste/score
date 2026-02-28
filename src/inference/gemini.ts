@@ -59,11 +59,11 @@ async function geminiAnalyze(
   if (!apiKey) throw new Error('GEMINI_API_KEY not set');
 
   const elapsed = timer();
-  log('INFER', 'gemini-request', { model: 'gemini-3-flash-preview', move: moveNumber });
+  log('INFER', 'gemini-request', { model: 'gemini-2.5-flash-lite', move: moveNumber });
 
   const ai = new GoogleGenAI({ apiKey });
   const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
+    model: 'gemini-2.5-flash-lite',
     contents: buildPrompt(board, currentTurn, moveNumber, series),
     config: {
       responseMimeType: 'application/json',
