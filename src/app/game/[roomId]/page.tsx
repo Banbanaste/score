@@ -8,6 +8,7 @@ import GameStatus from '@/components/game-status';
 import IntensityMeter from '@/components/intensity-meter';
 import ConnectionStatus from '@/components/connection-status';
 import EventDebugPanel from '@/components/event-debug-panel';
+import CrowdEmojis from '@/components/crowd-emojis';
 import SeriesScoreboard from '@/components/series-scoreboard';
 import RoundResultOverlay from '@/components/round-result-overlay';
 import SeriesResult from '@/components/series-result';
@@ -281,12 +282,36 @@ export default function GamePage() {
         winner={winner}
       />
 
-      <GameBoard
-        board={board}
-        onCellClick={handleCellClick}
-        winningCells={winningCells}
-        disabled={!isMyTurn}
-      />
+      <div className="flex items-center gap-2 sm:gap-4">
+        {/* Left stand – Team Blue */}
+        <div className="flex flex-row items-center gap-2 py-4 px-2 sm:px-3 bg-gray-900/80 rounded-xl border border-gray-700 min-h-[20rem] justify-center">
+          <span
+            className="text-blue-400 font-bold text-base sm:text-lg shrink-0"
+            style={{ writingMode: 'vertical-rl', textOrientation: 'mixed', transform: 'rotate(180deg)' }}
+          >
+            Team Blue
+          </span>
+          <CrowdEmojis intensity={intensity} variant="blue" slots={10} />
+        </div>
+
+        <GameBoard
+          board={board}
+          onCellClick={handleCellClick}
+          winningCells={winningCells}
+          disabled={!isMyTurn}
+        />
+
+        {/* Right stand – Team Red */}
+        <div className="flex flex-row items-center gap-2 py-4 px-2 sm:px-3 bg-gray-900/80 rounded-xl border border-gray-700 min-h-[20rem] justify-center">
+          <span
+            className="text-red-400 font-bold text-base sm:text-lg shrink-0"
+            style={{ writingMode: 'vertical-rl', textOrientation: 'mixed', transform: 'rotate(180deg)' }}
+          >
+            Team Red
+          </span>
+          <CrowdEmojis intensity={intensity} variant="red" slots={10} />
+        </div>
+      </div>
 
       <IntensityMeter intensity={intensity} />
 
