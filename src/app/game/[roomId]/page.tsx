@@ -249,12 +249,26 @@ export default function GamePage() {
     peakIntensityRef.current = 0;
   }, [socket, roomId]);
 
+  const handleBackToHome = useCallback(() => {
+    sessionStorage.removeItem('playerToken');
+    sessionStorage.removeItem('myMark');
+    sessionStorage.removeItem('joinRoomId');
+    router.push('/');
+  }, [router]);
+
   const isMyTurn = status === 'active' && currentTurn === myMark;
 
   return (
     <main className="min-h-screen bg-black text-white flex flex-col items-center justify-center gap-6 p-4">
-      <div className="absolute top-4 right-4">
+      <div className="absolute top-4 right-4 flex items-center gap-3">
         <ConnectionStatus connected={connected} />
+        <button
+          type="button"
+          onClick={handleBackToHome}
+          className="text-gray-400 hover:text-white text-sm underline transition-colors"
+        >
+          Back to home
+        </button>
       </div>
 
       <SeriesScoreboard series={series} />

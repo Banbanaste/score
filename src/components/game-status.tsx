@@ -21,8 +21,8 @@ export default function GameStatus({ roomId, myMark, currentTurn, status, winner
         <div className="text-yellow-400">Waiting for opponent...</div>
       )}
       {status === 'active' && (
-        <div className={isMyTurn ? 'text-green-400' : 'text-gray-400'}>
-          {isMyTurn ? '>>> Your turn' : "Opponent's turn"}
+        <div className={`text-2xl ${isMyTurn ? 'text-green-400' : 'text-gray-400'}`}>
+          {isMyTurn ? '🫵 Your turn' : '✋ Opponent\'s turn'}
         </div>
       )}
       {status === 'finished' && winner && (
