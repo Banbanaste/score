@@ -2,6 +2,8 @@ export type Mark = 'X' | 'O';
 export type Cell = Mark | null;
 export type Board = Cell[];  // length 9
 
+export type RoomStatus = 'waiting' | 'active' | 'round-over' | 'finished';
+
 export interface Move {
   cell: number;       // 0–8
   mark: Mark;
@@ -15,17 +17,36 @@ export interface PlayerIdentity {
   connected: boolean;
 }
 
+export interface RoundResult {
+  round: number;           // 1-indexed
+  winner: Mark | 'draw';
+  moves: number;
+  duration: number;        // ms
+  finalIntensity: number;
+}
+
+export interface SeriesState {
+  maxRounds: number;              // Always 5
+  currentRound: number;           // 1-indexed (1–5)
+  roundResults: RoundResult[];
+  wins: { X: number; O: number };
+  seriesOver: boolean;
+  seriesWinner: Mark | null;
+}
+
 export interface GameRoom {
   id: string;                               // 6-char room code (nanoid)
   players: Record<string, PlayerIdentity>;  // keyed by session token
   board: Board;                             // 9-cell array
   currentTurn: Mark;
-  status: 'waiting' | 'active' | 'finished';
+  status: RoomStatus;
   winner: Mark | 'draw' | null;
   intensity: number;                        // 0.0–1.0
   moveHistory: Move[];
   createdAt: number;
-  rematchRequests: Set<string>;             // player tokens who requested rematch
+  roundStartedAt: number;                   // timestamp when current round began
+  rematchRequests: Set<string>;             // player tokens who requested new series
+  series: SeriesState;
 }
 
 export interface WinResult {
@@ -41,4 +62,19 @@ export function createEmptyBoard(): Board {
 
 export function toggleTurn(turn: Mark): Mark {
   return turn === 'X' ? 'O' : 'X';
+}
+
+export function createInitialSeries(): SeriesState {
+  return {
+    maxRounds: 5,
+    currentRound: 1,
+    roundResults: [],
+    wins: { X: 0, O: 0 },
+    seriesOver: false,
+    seriesWinner: null,
+  };
+}
+
+export function roundStartingTurn(round: number): Mark {
+  return round % 2 === 1 ? 'X' : 'O';
 }

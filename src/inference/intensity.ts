@@ -1,4 +1,4 @@
-import { Board, Mark } from '@/game/types';
+import { Board, Mark, SeriesState } from '@/game/types';
 
 const WIN_LINES: number[][] = [
   [0, 1, 2], [3, 4, 5], [6, 7, 8],
@@ -42,4 +42,37 @@ export function analyzeIntensity(board: Board, currentTurn: Mark): number {
   if (isDrawForced(board)) intensity -= 0.10;
 
   return Math.max(0, Math.min(1, intensity));
+}
+
+export function computeRoundWeight(series: SeriesState): number {
+  // Round 1 = 0.00, Round 5 = 0.20
+  return ((series.currentRound - 1) / (series.maxRounds - 1)) * 0.20;
+}
+
+export function computeClosenessWeight(series: SeriesState): number {
+  const diff = Math.abs(series.wins.X - series.wins.O);
+  const totalWins = series.wins.X + series.wins.O;
+
+  if (totalWins === 0) return 0;
+
+  return Math.max(0, 0.30 - (diff * 0.10));
+}
+
+export function computeEliminationWeight(series: SeriesState): number {
+  const winsToClinh = 3;
+
+  const xNeedsOne = series.wins.X === winsToClinh - 1; // X is at 2 wins
+  const oNeedsOne = series.wins.O === winsToClinh - 1; // O is at 2 wins
+
+  if (xNeedsOne && oNeedsOne) return 0.30; // Both at match point
+  if (xNeedsOne || oNeedsOne) return 0.20; // One player at match point
+  return 0;
+}
+
+export function computeSeriesPressure(series: SeriesState): number {
+  const roundWeight = computeRoundWeight(series);
+  const closenessWeight = computeClosenessWeight(series);
+  const eliminationWeight = computeEliminationWeight(series);
+
+  return Math.min(0.80, roundWeight + closenessWeight + eliminationWeight);
 }

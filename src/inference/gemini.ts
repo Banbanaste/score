@@ -1,11 +1,12 @@
 import { GoogleGenAI } from '@google/genai';
-import type { Board, Mark } from '@/game/types';
-import { analyzeIntensity } from './intensity';
+import type { Board, Mark, SeriesState } from '@/game/types';
+import { analyzeIntensity, computeSeriesPressure } from './intensity';
 import { log, logError, timer } from '@/game/logger';
 
 export interface IntensityResult {
   value: number;
   source: 'gemini' | 'heuristic';
+  seriesPressure: number;
 }
 
 const SYSTEM_PROMPT = `You are a game-state analyzer for Tic-Tac-Toe.
@@ -16,11 +17,30 @@ Scoring guidelines:
 - 0.2-0.4: Early positioning, center or corner control established
 - 0.4-0.6: Developing threats, one player building toward a line
 - 0.6-0.8: Imminent threat, one player one move from winning, opponent must block
-- 0.8-1.0: Critical state. Fork detected (two winning paths), forced outcome, or decisive final move`;
+- 0.8-1.0: Critical state. Fork detected (two winning paths), forced outcome, or decisive final move
 
-function buildPrompt(board: Board, currentTurn: Mark, moveNumber: number): string {
+Series-level amplification:
+- Later rounds in the series are more tense than early rounds
+- A tied series (e.g. 2-2) dramatically increases tension
+- A player facing elimination (opponent at match point) raises stakes
+- Consider both board AND series context together`;
+
+function buildPrompt(board: Board, currentTurn: Mark, moveNumber: number, series: SeriesState): string {
   const boardStr = JSON.stringify(board);
-  return `Board: ${boardStr}\nCurrent turn: ${currentTurn}\nMove number: ${moveNumber}`;
+  let prompt = `Board: ${boardStr}\nCurrent turn: ${currentTurn}\nMove number: ${moveNumber}`;
+  prompt += `\nRound: ${series.currentRound} of ${series.maxRounds}`;
+  prompt += `\nSeries score: X ${series.wins.X} — O ${series.wins.O}`;
+
+  const winsToClinh = 3;
+  if (series.wins.X === winsToClinh - 1 && series.wins.O === winsToClinh - 1) {
+    prompt += `\nMatch point: Both players (next win clinches the series)`;
+  } else if (series.wins.X === winsToClinh - 1) {
+    prompt += `\nMatch point: X (needs 1 more win)`;
+  } else if (series.wins.O === winsToClinh - 1) {
+    prompt += `\nMatch point: O (needs 1 more win)`;
+  }
+
+  return prompt;
 }
 
 function createTimeout(ms: number): Promise<never> {
@@ -32,7 +52,8 @@ function createTimeout(ms: number): Promise<never> {
 async function geminiAnalyze(
   board: Board,
   currentTurn: Mark,
-  moveNumber: number
+  moveNumber: number,
+  series: SeriesState
 ): Promise<{ intensity: number }> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('GEMINI_API_KEY not set');
@@ -43,7 +64,7 @@ async function geminiAnalyze(
   const ai = new GoogleGenAI({ apiKey });
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
-    contents: buildPrompt(board, currentTurn, moveNumber),
+    contents: buildPrompt(board, currentTurn, moveNumber, series),
     config: {
       responseMimeType: 'application/json',
       systemInstruction: SYSTEM_PROMPT,
@@ -65,37 +86,44 @@ async function geminiAnalyze(
 export async function getIntensity(
   board: Board,
   currentTurn: Mark,
-  moveNumber: number
+  moveNumber: number,
+  series: SeriesState
 ): Promise<IntensityResult> {
   const elapsed = timer();
   const timeoutMs = Number(process.env.INFERENCE_TIMEOUT) || 3000;
 
   try {
     const result = await Promise.race([
-      geminiAnalyze(board, currentTurn, moveNumber),
+      geminiAnalyze(board, currentTurn, moveNumber, series),
       createTimeout(timeoutMs),
     ]);
     const raw = typeof result.intensity === 'number' ? result.intensity : NaN;
     if (isNaN(raw)) throw new Error('Invalid intensity from Gemini');
 
     const clamped = Math.max(0, Math.min(1, raw));
+    const pressure = computeSeriesPressure(series);
     log('INFER', 'pipeline-complete', {
       source: 'gemini',
       value: clamped.toFixed(2),
       raw: raw.toFixed(2),
       move: moveNumber,
+      seriesPressure: pressure.toFixed(2),
       ms: elapsed(),
     });
-    return { value: clamped, source: 'gemini' };
+    return { value: clamped, source: 'gemini', seriesPressure: pressure };
   } catch (err) {
     const heuristic = analyzeIntensity(board, currentTurn);
+    const pressure = computeSeriesPressure(series);
+    const amplified = Math.min(1, heuristic * (1 + pressure));
     logError('INFER', 'gemini-fallback', err, {
       source: 'heuristic',
-      value: heuristic.toFixed(2),
+      value: amplified.toFixed(2),
+      rawHeuristic: heuristic.toFixed(2),
+      seriesPressure: pressure.toFixed(2),
       move: moveNumber,
       timeoutMs,
       ms: elapsed(),
     });
-    return { value: heuristic, source: 'heuristic' };
+    return { value: amplified, source: 'heuristic', seriesPressure: pressure };
   }
 }

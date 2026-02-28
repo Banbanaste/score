@@ -3,6 +3,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.countImminentWins = countImminentWins;
 exports.isDrawForced = isDrawForced;
 exports.analyzeIntensity = analyzeIntensity;
+exports.computeRoundWeight = computeRoundWeight;
+exports.computeClosenessWeight = computeClosenessWeight;
+exports.computeEliminationWeight = computeEliminationWeight;
+exports.computeSeriesPressure = computeSeriesPressure;
 const WIN_LINES = [
     [0, 1, 2], [3, 4, 5], [6, 7, 8],
     [0, 3, 6], [1, 4, 7], [2, 5, 8],
@@ -45,4 +49,31 @@ function analyzeIntensity(board, currentTurn) {
     if (isDrawForced(board))
         intensity -= 0.10;
     return Math.max(0, Math.min(1, intensity));
+}
+function computeRoundWeight(series) {
+    // Round 1 = 0.00, Round 5 = 0.20
+    return ((series.currentRound - 1) / (series.maxRounds - 1)) * 0.20;
+}
+function computeClosenessWeight(series) {
+    const diff = Math.abs(series.wins.X - series.wins.O);
+    const totalWins = series.wins.X + series.wins.O;
+    if (totalWins === 0)
+        return 0;
+    return Math.max(0, 0.30 - (diff * 0.10));
+}
+function computeEliminationWeight(series) {
+    const winsToClinh = 3;
+    const xNeedsOne = series.wins.X === winsToClinh - 1; // X is at 2 wins
+    const oNeedsOne = series.wins.O === winsToClinh - 1; // O is at 2 wins
+    if (xNeedsOne && oNeedsOne)
+        return 0.30; // Both at match point
+    if (xNeedsOne || oNeedsOne)
+        return 0.20; // One player at match point
+    return 0;
+}
+function computeSeriesPressure(series) {
+    const roundWeight = computeRoundWeight(series);
+    const closenessWeight = computeClosenessWeight(series);
+    const eliminationWeight = computeEliminationWeight(series);
+    return Math.min(0.80, roundWeight + closenessWeight + eliminationWeight);
 }

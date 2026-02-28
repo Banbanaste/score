@@ -7,6 +7,7 @@ const engine_1 = require("../game/engine");
 const gemini_1 = require("../inference/gemini");
 const intensity_1 = require("../inference/intensity");
 const logger_1 = require("../game/logger");
+const ROUND_TRANSITION_DELAY = 3000;
 function emitError(socket, code, message) {
     (0, logger_1.log)('SOCKET', 'emit-error', { sid: socket.id, code, message });
     socket.emit('error', { code, message });
@@ -72,6 +73,13 @@ function registerHandlers(io) {
                         currentTurn: room.currentTurn,
                         players: Object.fromEntries(Object.entries(room.players).map(([, p]) => [p.mark, { mark: p.mark }])),
                         intensity: 0,
+                        series: {
+                            currentRound: room.series.currentRound,
+                            maxRounds: room.series.maxRounds,
+                            wins: { ...room.series.wins },
+                            seriesOver: false,
+                            roundResults: [],
+                        },
                     };
                     if (token === result.playerToken) {
                         startPayload.playerToken = result.playerToken;
@@ -100,8 +108,10 @@ function registerHandlers(io) {
             }
             const { room, playerToken } = roomInfo;
             if (room.status !== 'active') {
-                (0, logger_1.log)('GAME', 'move-rejected', { room: roomId, reason: 'not-active', status: room.status });
-                emitError(socket, 'GAME_NOT_ACTIVE', 'Game is not in active state');
+                const code = room.status === 'round-over' ? 'ROUND_TRANSITION' : 'GAME_NOT_ACTIVE';
+                const msg = room.status === 'round-over' ? 'Round is transitioning' : 'Game is not in active state';
+                (0, logger_1.log)('GAME', 'move-rejected', { room: roomId, reason: code, status: room.status });
+                emitError(socket, code, msg);
                 return;
             }
             const mark = (0, room_manager_1.getPlayerMark)(room, playerToken);
@@ -146,22 +156,79 @@ function registerHandlers(io) {
             // --- Check game result ---
             const result = (0, engine_1.checkGameResult)(room.board);
             if (result) {
-                room.status = 'finished';
-                room.winner = result.winner;
-                io.to(roomId).emit('game-over', {
+                // Record the round result
+                (0, room_manager_1.recordRoundResult)(room, result.winner, room.intensity);
+                // Check if series is decided
+                const seriesDecided = (0, room_manager_1.checkSeriesOver)(room);
+                // Emit round-over to room
+                io.to(roomId).emit('round-over', {
+                    round: room.series.currentRound,
                     winner: result.winner,
                     winningCells: result.winningCells,
                     board: room.board,
                     finalIntensity: room.intensity,
+                    series: {
+                        wins: { ...room.series.wins },
+                        currentRound: room.series.currentRound,
+                        maxRounds: room.series.maxRounds,
+                        seriesOver: room.series.seriesOver,
+                        roundResults: [...room.series.roundResults],
+                    },
+                    nextRoundIn: seriesDecided ? null : ROUND_TRANSITION_DELAY,
                 });
-                (0, logger_1.log)('GAME', 'game-over', {
+                (0, logger_1.log)('GAME', 'round-over', {
                     room: roomId,
+                    round: room.series.currentRound,
                     winner: result.winner,
-                    winningCells: result.winningCells,
-                    moves: moveNumber,
-                    intensity: heuristicIntensity.toFixed(2),
+                    score: `${room.series.wins.X}-${room.series.wins.O}`,
+                    seriesOver: seriesDecided,
                     ms: moveTimer(),
                 });
+                if (seriesDecided) {
+                    // Emit series-over
+                    room.status = 'finished';
+                    const totalMoves = room.series.roundResults.reduce((sum, r) => sum + r.moves, 0);
+                    const peakIntensity = Math.max(...room.series.roundResults.map(r => r.finalIntensity), 0);
+                    io.to(roomId).emit('series-over', {
+                        seriesWinner: room.series.seriesWinner,
+                        finalScore: { ...room.series.wins },
+                        rounds: room.series.roundResults.map(r => ({ round: r.round, winner: r.winner, moves: r.moves })),
+                        totalMoves,
+                        peakIntensity,
+                    });
+                    (0, logger_1.log)('GAME', 'series-over', {
+                        room: roomId,
+                        winner: room.series.seriesWinner,
+                        score: `${room.series.wins.X}-${room.series.wins.O}`,
+                        totalMoves,
+                    });
+                }
+                else {
+                    // Schedule next round after delay
+                    setTimeout(() => {
+                        // Guard: room might have been cleaned up
+                        const currentRoom = (0, room_manager_1.getRoom)(roomId);
+                        if (!currentRoom || currentRoom.status !== 'round-over')
+                            return;
+                        (0, room_manager_1.advanceRound)(currentRoom);
+                        io.to(roomId).emit('round-start', {
+                            round: currentRoom.series.currentRound,
+                            board: currentRoom.board,
+                            currentTurn: currentRoom.currentTurn,
+                            series: {
+                                wins: { ...currentRoom.series.wins },
+                                currentRound: currentRoom.series.currentRound,
+                                maxRounds: currentRoom.series.maxRounds,
+                            },
+                            intensity: 0,
+                        });
+                        (0, logger_1.log)('GAME', 'round-start', {
+                            room: roomId,
+                            round: currentRoom.series.currentRound,
+                            firstTurn: currentRoom.currentTurn,
+                        });
+                    }, ROUND_TRANSITION_DELAY);
+                }
             }
             else {
                 room.currentTurn = (0, types_1.toggleTurn)(room.currentTurn);
@@ -172,6 +239,10 @@ function registerHandlers(io) {
                     currentTurn: room.currentTurn,
                     intensity: room.intensity,
                     moveNumber,
+                    series: {
+                        currentRound: room.series.currentRound,
+                        wins: { ...room.series.wins },
+                    },
                 });
                 (0, logger_1.log)('GAME', 'move-emitted', {
                     room: roomId,
@@ -183,7 +254,7 @@ function registerHandlers(io) {
             // --- Fire Gemini in background (non-blocking) ---
             const inferTimer = (0, logger_1.timer)();
             const boardSnapshot = [...room.board];
-            (0, gemini_1.getIntensity)(boardSnapshot, mark, moveNumber)
+            (0, gemini_1.getIntensity)(boardSnapshot, mark, moveNumber, room.series)
                 .then((intensityResult) => {
                 const elapsed = inferTimer();
                 // Only update if room still exists and hasn't been reset (rematch)
@@ -195,6 +266,7 @@ function registerHandlers(io) {
                     intensity: intensityResult.value,
                     source: intensityResult.source,
                     moveNumber,
+                    seriesPressure: intensityResult.seriesPressure,
                 });
                 (0, logger_1.log)('INFER', 'intensity-resolved', {
                     room: roomId,
@@ -213,33 +285,37 @@ function registerHandlers(io) {
                 });
             });
         });
-        // === REMATCH ===
-        socket.on('rematch', () => {
+        // === NEW SERIES ===
+        socket.on('new-series', () => {
             const roomInfo = (0, room_manager_1.getRoomBySocket)(sid);
             if (!roomInfo) {
                 emitError(socket, 'ROOM_NOT_FOUND', 'Room does not exist');
                 return;
             }
             const { room, playerToken } = roomInfo;
-            if (room.status !== 'finished') {
-                emitError(socket, 'GAME_NOT_ACTIVE', 'Game is not in finished state');
+            if (!room.series.seriesOver) {
+                emitError(socket, 'SERIES_NOT_FINISHED', 'Series is not finished');
                 return;
             }
             const playerMark = (0, room_manager_1.getPlayerMark)(room, playerToken);
-            (0, logger_1.log)('ROOM', 'rematch-request', { room: room.id, mark: playerMark, sid });
-            const rematchStarted = (0, room_manager_1.requestRematch)(room, playerToken);
-            if (rematchStarted) {
-                io.to(room.id).emit('game-start', {
-                    roomId: room.id,
+            (0, logger_1.log)('ROOM', 'new-series-request', { room: room.id, mark: playerMark, sid });
+            const started = (0, room_manager_1.requestRematch)(room, playerToken);
+            if (started) {
+                io.to(room.id).emit('round-start', {
+                    round: room.series.currentRound,
                     board: room.board,
                     currentTurn: room.currentTurn,
-                    players: Object.fromEntries(Object.entries(room.players).map(([, p]) => [p.mark, { mark: p.mark }])),
+                    series: {
+                        wins: { ...room.series.wins },
+                        currentRound: room.series.currentRound,
+                        maxRounds: room.series.maxRounds,
+                    },
                     intensity: 0,
                 });
-                (0, logger_1.log)('ROOM', 'rematch-started', { room: room.id, firstTurn: room.currentTurn });
+                (0, logger_1.log)('ROOM', 'new-series-started', { room: room.id });
             }
             else {
-                (0, logger_1.log)('ROOM', 'rematch-waiting', { room: room.id, waiting: room.rematchRequests.size });
+                (0, logger_1.log)('ROOM', 'new-series-waiting', { room: room.id });
             }
         });
         // === REJOIN ROOM ===
@@ -263,6 +339,13 @@ function registerHandlers(io) {
                 intensity: room.intensity,
                 status: room.status,
                 moveHistory: room.moveHistory,
+                series: {
+                    currentRound: room.series.currentRound,
+                    maxRounds: room.series.maxRounds,
+                    wins: { ...room.series.wins },
+                    seriesOver: room.series.seriesOver,
+                    roundResults: [...room.series.roundResults],
+                },
             });
             const opponentSocketId = getOpponentSocketId(room, playerToken);
             if (opponentSocketId) {
@@ -323,16 +406,38 @@ function registerHandlers(io) {
                     const forfeited = (0, room_manager_1.forfeitRoom)(room.id, disconnectedToken);
                     if (forfeited && opponentSocketId) {
                         const winnerMark = disconnectedMark === 'X' ? 'O' : 'X';
-                        io.to(opponentSocketId).emit('game-over', {
+                        // Record current round as forfeited
+                        (0, room_manager_1.recordRoundResult)(forfeited, winnerMark, forfeited.intensity);
+                        // Emit round-over
+                        io.to(opponentSocketId).emit('round-over', {
+                            round: forfeited.series.currentRound,
                             winner: winnerMark,
                             board: forfeited.board,
                             finalIntensity: forfeited.intensity,
+                            series: {
+                                wins: { ...forfeited.series.wins },
+                                currentRound: forfeited.series.currentRound,
+                                maxRounds: forfeited.series.maxRounds,
+                                seriesOver: true,
+                                roundResults: [...forfeited.series.roundResults],
+                            },
+                            nextRoundIn: null,
                         });
-                        (0, logger_1.log)('GAME', 'game-over', {
+                        // Emit series-over (forfeit ends the whole series)
+                        const totalMoves = forfeited.series.roundResults.reduce((sum, r) => sum + r.moves, 0);
+                        const peakIntensity = Math.max(...forfeited.series.roundResults.map(r => r.finalIntensity), 0);
+                        io.to(opponentSocketId).emit('series-over', {
+                            seriesWinner: winnerMark,
+                            finalScore: { ...forfeited.series.wins },
+                            rounds: forfeited.series.roundResults.map(r => ({ round: r.round, winner: r.winner, moves: r.moves })),
+                            totalMoves,
+                            peakIntensity,
+                        });
+                        (0, logger_1.log)('GAME', 'series-over', {
                             room: room.id,
                             winner: winnerMark,
                             reason: 'forfeit',
-                            moves: room.moveHistory.length,
+                            score: `${forfeited.series.wins.X}-${forfeited.series.wins.O}`,
                         });
                     }
                 });
@@ -351,6 +456,8 @@ function getErrorMessage(code) {
         ALREADY_IN_ROOM: 'Player is already in a room',
         INVALID_TOKEN: 'Session token does not match any player in room',
         RECONNECT_EXPIRED: 'Reconnection window has expired',
+        SERIES_NOT_FINISHED: 'Series is not finished',
+        ROUND_TRANSITION: 'Round is transitioning',
     };
     return messages[code] || 'An unknown error occurred';
 }

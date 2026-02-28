@@ -1,6 +1,6 @@
 import { randomBytes } from 'crypto';
 import { nanoid } from 'nanoid';
-import { GameRoom, Mark, createEmptyBoard, toggleTurn } from './types';
+import { GameRoom, Mark, createEmptyBoard, toggleTurn, createInitialSeries, roundStartingTurn } from './types';
 import { log } from './logger';
 
 const rooms = new Map<string, GameRoom>();
@@ -34,7 +34,9 @@ export function createRoom(socketId: string): { room: GameRoom; playerToken: str
     intensity: 0,
     moveHistory: [],
     createdAt: Date.now(),
+    roundStartedAt: Date.now(),
     rematchRequests: new Set(),
+    series: createInitialSeries(),
   };
   rooms.set(roomId, room);
   socketToRoom.set(socketId, { roomId, playerToken });
@@ -128,15 +130,9 @@ export function requestRematch(room: GameRoom, playerToken: string): boolean {
 
   const playerTokens = Object.keys(room.players);
   if (playerTokens.length === 2 && playerTokens.every(t => room.rematchRequests.has(t))) {
-    // Both players requested rematch — reset
-    room.board = createEmptyBoard();
-    room.currentTurn = toggleTurn(room.currentTurn); // swap starter
-    room.status = 'active';
-    room.winner = null;
-    room.intensity = 0;
-    room.moveHistory = [];
-    room.rematchRequests.clear();
-    return true; // rematch started
+    // Both players agreed — reset for a new series
+    resetSeries(room);
+    return true; // new series started
   }
   return false; // waiting for other player
 }
@@ -148,9 +144,123 @@ export function forfeitRoom(roomId: string, forfeitedToken: string): GameRoom | 
   const forfeited = room.players[forfeitedToken];
   if (!forfeited) return undefined;
 
+  const winnerMark: Mark = forfeited.mark === 'X' ? 'O' : 'X';
+
   room.status = 'finished';
-  room.winner = forfeited.mark === 'X' ? 'O' : 'X';
+  room.winner = winnerMark;
+  room.series.seriesOver = true;
+  room.series.seriesWinner = winnerMark;
+
+  log('ROOM', 'forfeit-series', {
+    room: roomId,
+    forfeited: forfeited.mark,
+    seriesWinner: winnerMark,
+    score: `${room.series.wins.X}-${room.series.wins.O}`,
+  });
+
   return room;
+}
+
+export function advanceRound(room: GameRoom): void {
+  room.series.currentRound++;
+  room.board = createEmptyBoard();
+  room.currentTurn = roundStartingTurn(room.series.currentRound);
+  room.moveHistory = [];
+  room.intensity = 0;
+  room.winner = null;
+  room.status = 'active';
+  room.roundStartedAt = Date.now();
+
+  log('ROOM', 'round-advanced', {
+    room: room.id,
+    round: room.series.currentRound,
+    firstTurn: room.currentTurn,
+  });
+}
+
+export function recordRoundResult(room: GameRoom, winner: Mark | 'draw', finalIntensity: number): void {
+  const round = room.series.currentRound;
+
+  room.series.roundResults.push({
+    round,
+    winner,
+    moves: room.moveHistory.length,
+    duration: Date.now() - room.roundStartedAt,
+    finalIntensity,
+  });
+
+  if (winner !== 'draw') {
+    room.series.wins[winner]++;
+  }
+
+  room.status = 'round-over';
+  room.winner = winner;
+
+  log('ROOM', 'round-recorded', {
+    room: room.id,
+    round,
+    winner,
+    score: `${room.series.wins.X}-${room.series.wins.O}`,
+  });
+}
+
+export function checkSeriesOver(room: GameRoom): boolean {
+  const { wins, currentRound, maxRounds } = room.series;
+
+  if (wins.X >= 3) {
+    room.series.seriesOver = true;
+    room.series.seriesWinner = 'X';
+    log('ROOM', 'series-decided', {
+      room: room.id,
+      winner: 'X',
+      score: `${wins.X}-${wins.O}`,
+    });
+    return true;
+  }
+
+  if (wins.O >= 3) {
+    room.series.seriesOver = true;
+    room.series.seriesWinner = 'O';
+    log('ROOM', 'series-decided', {
+      room: room.id,
+      winner: 'O',
+      score: `${wins.X}-${wins.O}`,
+    });
+    return true;
+  }
+
+  if (currentRound >= maxRounds) {
+    room.series.seriesOver = true;
+    if (wins.X > wins.O) {
+      room.series.seriesWinner = 'X';
+    } else if (wins.O > wins.X) {
+      room.series.seriesWinner = 'O';
+    } else {
+      room.series.seriesWinner = null;
+    }
+    log('ROOM', 'series-decided', {
+      room: room.id,
+      winner: room.series.seriesWinner,
+      score: `${wins.X}-${wins.O}`,
+    });
+    return true;
+  }
+
+  return false;
+}
+
+export function resetSeries(room: GameRoom): void {
+  room.series = createInitialSeries();
+  room.board = createEmptyBoard();
+  room.moveHistory = [];
+  room.intensity = 0;
+  room.winner = null;
+  room.status = 'active';
+  room.roundStartedAt = Date.now();
+  room.currentTurn = 'X';
+  room.rematchRequests.clear();
+
+  log('ROOM', 'series-reset', { room: room.id });
 }
 
 export function deleteRoom(roomId: string): void {

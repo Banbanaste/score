@@ -10,6 +10,10 @@ exports.reconnectPlayer = reconnectPlayer;
 exports.setDisconnectTimer = setDisconnectTimer;
 exports.requestRematch = requestRematch;
 exports.forfeitRoom = forfeitRoom;
+exports.advanceRound = advanceRound;
+exports.recordRoundResult = recordRoundResult;
+exports.checkSeriesOver = checkSeriesOver;
+exports.resetSeries = resetSeries;
 exports.deleteRoom = deleteRoom;
 exports.startCleanupInterval = startCleanupInterval;
 const crypto_1 = require("crypto");
@@ -42,7 +46,9 @@ function createRoom(socketId) {
         intensity: 0,
         moveHistory: [],
         createdAt: Date.now(),
+        roundStartedAt: Date.now(),
         rematchRequests: new Set(),
+        series: (0, types_1.createInitialSeries)(),
     };
     rooms.set(roomId, room);
     socketToRoom.set(socketId, { roomId, playerToken });
@@ -124,15 +130,9 @@ function requestRematch(room, playerToken) {
     room.rematchRequests.add(playerToken);
     const playerTokens = Object.keys(room.players);
     if (playerTokens.length === 2 && playerTokens.every(t => room.rematchRequests.has(t))) {
-        // Both players requested rematch — reset
-        room.board = (0, types_1.createEmptyBoard)();
-        room.currentTurn = (0, types_1.toggleTurn)(room.currentTurn); // swap starter
-        room.status = 'active';
-        room.winner = null;
-        room.intensity = 0;
-        room.moveHistory = [];
-        room.rematchRequests.clear();
-        return true; // rematch started
+        // Both players agreed — reset for a new series
+        resetSeries(room);
+        return true; // new series started
     }
     return false; // waiting for other player
 }
@@ -143,9 +143,108 @@ function forfeitRoom(roomId, forfeitedToken) {
     const forfeited = room.players[forfeitedToken];
     if (!forfeited)
         return undefined;
+    const winnerMark = forfeited.mark === 'X' ? 'O' : 'X';
     room.status = 'finished';
-    room.winner = forfeited.mark === 'X' ? 'O' : 'X';
+    room.winner = winnerMark;
+    room.series.seriesOver = true;
+    room.series.seriesWinner = winnerMark;
+    (0, logger_1.log)('ROOM', 'forfeit-series', {
+        room: roomId,
+        forfeited: forfeited.mark,
+        seriesWinner: winnerMark,
+        score: `${room.series.wins.X}-${room.series.wins.O}`,
+    });
     return room;
+}
+function advanceRound(room) {
+    room.series.currentRound++;
+    room.board = (0, types_1.createEmptyBoard)();
+    room.currentTurn = (0, types_1.roundStartingTurn)(room.series.currentRound);
+    room.moveHistory = [];
+    room.intensity = 0;
+    room.winner = null;
+    room.status = 'active';
+    room.roundStartedAt = Date.now();
+    (0, logger_1.log)('ROOM', 'round-advanced', {
+        room: room.id,
+        round: room.series.currentRound,
+        firstTurn: room.currentTurn,
+    });
+}
+function recordRoundResult(room, winner, finalIntensity) {
+    const round = room.series.currentRound;
+    room.series.roundResults.push({
+        round,
+        winner,
+        moves: room.moveHistory.length,
+        duration: Date.now() - room.roundStartedAt,
+        finalIntensity,
+    });
+    if (winner !== 'draw') {
+        room.series.wins[winner]++;
+    }
+    room.status = 'round-over';
+    room.winner = winner;
+    (0, logger_1.log)('ROOM', 'round-recorded', {
+        room: room.id,
+        round,
+        winner,
+        score: `${room.series.wins.X}-${room.series.wins.O}`,
+    });
+}
+function checkSeriesOver(room) {
+    const { wins, currentRound, maxRounds } = room.series;
+    if (wins.X >= 3) {
+        room.series.seriesOver = true;
+        room.series.seriesWinner = 'X';
+        (0, logger_1.log)('ROOM', 'series-decided', {
+            room: room.id,
+            winner: 'X',
+            score: `${wins.X}-${wins.O}`,
+        });
+        return true;
+    }
+    if (wins.O >= 3) {
+        room.series.seriesOver = true;
+        room.series.seriesWinner = 'O';
+        (0, logger_1.log)('ROOM', 'series-decided', {
+            room: room.id,
+            winner: 'O',
+            score: `${wins.X}-${wins.O}`,
+        });
+        return true;
+    }
+    if (currentRound >= maxRounds) {
+        room.series.seriesOver = true;
+        if (wins.X > wins.O) {
+            room.series.seriesWinner = 'X';
+        }
+        else if (wins.O > wins.X) {
+            room.series.seriesWinner = 'O';
+        }
+        else {
+            room.series.seriesWinner = null;
+        }
+        (0, logger_1.log)('ROOM', 'series-decided', {
+            room: room.id,
+            winner: room.series.seriesWinner,
+            score: `${wins.X}-${wins.O}`,
+        });
+        return true;
+    }
+    return false;
+}
+function resetSeries(room) {
+    room.series = (0, types_1.createInitialSeries)();
+    room.board = (0, types_1.createEmptyBoard)();
+    room.moveHistory = [];
+    room.intensity = 0;
+    room.winner = null;
+    room.status = 'active';
+    room.roundStartedAt = Date.now();
+    room.currentTurn = 'X';
+    room.rematchRequests.clear();
+    (0, logger_1.log)('ROOM', 'series-reset', { room: room.id });
 }
 function deleteRoom(roomId) {
     const room = rooms.get(roomId);
